@@ -30,21 +30,20 @@ use crate::library::utility::{
     copy_recursive, get_date, get_delimiter, paint_string, print_output_buf, DateFormat, Never,
 };
 use crate::lookup::versions::versions_lookup_exec;
+use crate::CONFIG;
 
 // these represent the items ready for selection and preview
 // contains everything one needs to request preview and paint with
 // LsColors -- see preview_view, preview for how preview is done
 // and impl Colorable for how we paint the path strings
 pub struct SelectionCandidate {
-    config: Arc<Config>,
     path: PathBuf,
     file_type: Option<FileType>,
 }
 
 impl SelectionCandidate {
-    pub fn new(config: Arc<Config>, basic_info: BasicDirEntryInfo, is_phantom: bool) -> Self {
+    pub fn new(basic_info: BasicDirEntryInfo, is_phantom: bool) -> Self {
         SelectionCandidate {
-            config,
             path: basic_info.path,
             // here save space of bool/padding instead of an "is_phantom: bool"
             //
@@ -92,7 +91,7 @@ impl SelectionCandidate {
     }
 
     fn preview_view(&self) -> HttmResult<String> {
-        let config = &self.config;
+        let config = CONFIG.as_ref();
         let paths_selected = &[PathData::from(self.path.as_path())];
 
         // generate a config for display
@@ -132,12 +131,13 @@ impl SkimItem for SelectionCandidate {
             &self
                 .path
                 .strip_prefix(
-                    &self
-                        .config
+                    CONFIG
+                        .as_ref()
                         .opt_requested_dir
                         .as_ref()
                         .expect("requested_dir should never be None in Interactive Browse mode")
-                        .path_buf,
+                        .path_buf
+                        .as_path(),
                 )
                 .unwrap_or(&self.path)
                 .to_string_lossy(),
@@ -153,7 +153,7 @@ impl SkimItem for SelectionCandidate {
 }
 
 pub fn interactive_exec(
-    config: Arc<Config>,
+    config: &Config,
     interactive_mode: &InteractiveMode,
 ) -> HttmResult<Vec<PathData>> {
     let paths_selected_in_browse = match &config.opt_requested_dir {
@@ -161,7 +161,7 @@ pub fn interactive_exec(
         Some(requested_dir) => {
             // loop until user selects a valid path
             loop {
-                let selected_pathdata = browse_view(config.clone(), requested_dir)?
+                let selected_pathdata = browse_view(config, requested_dir)?
                     .into_iter()
                     .map(|path_string| PathData::from(Path::new(&path_string)))
                     .collect::<Vec<PathData>>();
@@ -177,7 +177,7 @@ pub fn interactive_exec(
             match config.paths.get(0) {
                 Some(first_path) => {
                     let selected_file = first_path.clone();
-                    interactive_select(config.as_ref(), &[selected_file], interactive_mode)?;
+                    interactive_select(config, &[selected_file], interactive_mode)?;
                     unreachable!("interactive select never returns so unreachable here")
                 }
                 // Config::from should never allow us to have an instance where we don't
@@ -193,7 +193,7 @@ pub fn interactive_exec(
     // or continue down the interactive rabbit hole?
     match interactive_mode {
         InteractiveMode::Restore | InteractiveMode::Select => {
-            interactive_select(config.as_ref(), &paths_selected_in_browse, interactive_mode)?;
+            interactive_select(config, &paths_selected_in_browse, interactive_mode)?;
             unreachable!()
         }
         // InteractiveMode::Browse executes back through fn exec() in main.rs
@@ -202,7 +202,7 @@ pub fn interactive_exec(
 }
 
 #[allow(unused_variables)]
-fn browse_view(config: Arc<Config>, requested_dir: &PathData) -> HttmResult<Vec<String>> {
+fn browse_view(config: &Config, requested_dir: &PathData) -> HttmResult<Vec<String>> {
     // prep thread spawn
     let requested_dir_clone = requested_dir.path_buf.clone();
     let config_clone = config.clone();
@@ -213,7 +213,7 @@ fn browse_view(config: Arc<Config>, requested_dir: &PathData) -> HttmResult<Vec<
     thread::spawn(move || {
         // no way to propagate error from closure so exit and explain error here
         recursive_exec(
-            config_clone,
+            &config_clone,
             &requested_dir_clone,
             tx_item.clone(),
             hangup_rx.clone(),

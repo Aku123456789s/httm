@@ -15,6 +15,9 @@
 // For the full copyright and license information, please view the LICENSE file
 // that was distributed with this source code.
 
+#[macro_use]
+extern crate lazy_static;
+
 mod data {
     pub mod filesystem_info;
     pub mod paths;
@@ -52,6 +55,8 @@ mod parse {
     pub mod snaps;
 }
 
+use std::sync::Arc;
+
 use crate::config::generate::{Config, ExecMode};
 use crate::lookup::file_mounts::MountsForFiles;
 
@@ -78,10 +83,23 @@ fn main() {
     }
 }
 
+// global config avoids having to store Arc ref for each Selection Candidate
+// no need to endlessly clone the pointer, etc...
+lazy_static! {
+    /// This is an example for using doc comment attributes
+    static ref CONFIG: Arc<Config> = match Config::new() {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("Error: {}", error);
+            std::process::exit(1)
+        }
+    };
+}
+
 fn exec() -> HttmResult<()> {
     // get our program args and generate a config for use
     // everywhere else
-    let config = Config::new()?;
+    let config = CONFIG.as_ref();
 
     if config.opt_debug {
         eprintln!("{:#?}", config);
@@ -93,22 +111,20 @@ fn exec() -> HttmResult<()> {
         // from an interactive browse must get the paths to print to display, or continue
         // to select or restore functions
         ExecMode::Interactive(interactive_mode) => {
-            let browse_result = &interactive_exec(config.clone(), interactive_mode)?;
-            let map_to_live_snaps = versions_lookup_exec(config.as_ref(), browse_result)?;
-            print_display_map(&config, map_to_live_snaps)?
+            let browse_result = &interactive_exec(config, interactive_mode)?;
+            let map_to_live_snaps = versions_lookup_exec(config, browse_result)?;
+            print_display_map(config, map_to_live_snaps)?
         }
         // ExecMode::Display will be just printed, we already know the paths
         ExecMode::Display | ExecMode::NumVersions(_) => {
-            let map_to_live_snaps = versions_lookup_exec(config.as_ref(), &config.paths)?;
-            print_display_map(&config, map_to_live_snaps)?
+            let map_to_live_snaps = versions_lookup_exec(config, &config.paths)?;
+            print_display_map(config, map_to_live_snaps)?
         }
         // ExecMode::DisplayRecursive, ExecMode::SnapFileMount, and ExecMode::MountsForFiles will print their
         // output elsewhere
-        ExecMode::DisplayRecursive(_) => display_recursive_wrapper(config.clone())?,
-        ExecMode::SnapFileMount(snapshot_suffix) => {
-            take_snapshot(config.as_ref(), snapshot_suffix)?
-        }
-        ExecMode::MountsForFiles => MountsForFiles::display(config.as_ref())?,
+        ExecMode::DisplayRecursive(_) => display_recursive_wrapper(config)?,
+        ExecMode::SnapFileMount(snapshot_suffix) => take_snapshot(config, snapshot_suffix)?,
+        ExecMode::MountsForFiles => MountsForFiles::display(config)?,
     }
 
     Ok(())
