@@ -48,6 +48,7 @@ pub enum InteractiveMode {
     Browse,
     Select,
     Restore(RestoreMode),
+    Wipe,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -730,7 +731,9 @@ impl Config {
                                                     )
                                                     .into());
                                         }
-                                        InteractiveMode::Restore(_) | InteractiveMode::Select => {
+                                        InteractiveMode::Restore(_)
+                                        | InteractiveMode::Select
+                                        | InteractiveMode::Wipe => {
                                             // non-dir file will just cause us to skip the lookup phase
                                             None
                                         }

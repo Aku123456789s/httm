@@ -77,7 +77,7 @@ impl VersionsMap {
         Ok(versions_map)
     }
 
-    fn exec(config: &Config, path_set: &[PathData]) -> Self {
+    pub fn exec(config: &Config, path_set: &[PathData]) -> Self {
         // create vec of all local and replicated backups at once
         let snaps_selected_for_search = config
             .dataset_collection
