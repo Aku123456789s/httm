@@ -42,21 +42,21 @@ impl InteractiveWipe {
             );
         }
 
-        let (non_zfs_mounts, zfs_mounts): (BTreeMap<PathData, Vec<PathData>>, BTreeMap<PathData, Vec<PathData>>)  = MountsForFiles::new(config)
+        let (non_zfs_mounts, zfs_mounts): (BTreeMap<PathData, Vec<PathData>>, BTreeMap<PathData, Vec<PathData>>) = MountsForFiles::new(config)
             .into_iter()
             .flat_map(|(_pathdata, datasets)| datasets)
             .partition(|mount| {
                 match config.dataset_collection.map_of_datasets.datasets.get(&mount.path_buf) {
-                        Some(dataset_info) => {
-                            if let FilesystemType::Zfs = dataset_info.fs_type {
-                                false
-                            } else {
-                                eprintln!("Error: {:?} is an non-ZFS dataset", mount);
-                                true
-                            }
+                    Some(dataset_info) => {
+                        if let FilesystemType::Zfs = dataset_info.fs_type {
+                            false
+                        } else {
+                            eprintln!("Error: {:?} is an non-ZFS dataset", mount);
+                            true
                         }
-                        None => false,
                     }
+                    None => false,
+                }
             });
         
         if !non_zfs_mounts.is_empty() {
@@ -67,27 +67,31 @@ impl InteractiveWipe {
 
         let version_map = VersionsMap::exec(config, &dne_paths);
 
-        let snapshot_names_to_wipe: BTreeMap<PathData, Vec<String>>  = version_map
+        let snapshot_names: BTreeMap<PathData, Vec<String>>  = version_map
             .into_iter()
             .map(|(deleted_file, snap_path)| {
                 let res: Vec<String> = snap_path
                     .iter()
                     .filter_map(|path| {
                        path.path_buf
-                        .to_string_lossy()
-                        .split_once(".zfs/snapshot/")
-                        .map(|(_first, rest)| rest)
-                        .map(|str| str.split_once("/"))
-                        .map(||)
+                            .to_string_lossy()
+                            .split_once(".zfs/snapshot/")
                     })
-                    .map(|str| str.to_owned())
+                    .map(|(_first, rest)| rest)
+                    .filter_map(|rest| rest.split_once("/"))
+                    .map(|(first, _rest)| first.to_owned()) 
                     .collect();
                 (deleted_file, res)
             })
             .collect();
 
+        let wipe_map = dne_paths
+            .iter()
+            .map(|path| {
+                let dataset = zfs_mounts.get(path);
 
-        let requested_file_wipes = version_map.keys().collect();
+                let snapshop_names = snapshot_names.get(path);
+            })
 
         // tell the user what we're up to, and get consent
         let preview_buffer = format!(
