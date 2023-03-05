@@ -15,7 +15,7 @@
 // For the full copyright and license information, please view the LICENSE file
 // that was distributed with this source code.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::{collections::BTreeMap, ops::Deref};
 
 use rayon::prelude::*;
@@ -96,8 +96,8 @@ impl SnapNameMap {
                 let snap_names: Vec<String> = vec_snaps
                     .into_par_iter()
                     .filter_map(|pathdata| {
-                        Self::deconstruct_snap_pathdata(&pathdata)
-                            .map(|(snap_name, _relpath)| snap_name)
+                        DeconstructedSnapPathData::new(&pathdata, false)
+                            .map(|deconstructed| deconstructed.snap_name)
                     })
                     .filter(|snap| {
                         if let Some(filters) = opt_filters {
@@ -137,8 +137,15 @@ impl SnapNameMap {
             _ => inner.into(),
         }
     }
+}
 
-    fn deconstruct_snap_pathdata(pathdata: &PathData) -> Option<(String, PathBuf)> {
+pub struct DeconstructedSnapPathData {
+    pub snap_name: String,
+    pub relpath: Option<String>,
+}
+
+impl DeconstructedSnapPathData {
+    pub fn new(pathdata: &PathData, include_relpath: bool) -> Option<DeconstructedSnapPathData> {
         let path_string = &pathdata.path_buf.to_string_lossy();
 
         let (dataset_path, opt_split) =
@@ -159,9 +166,17 @@ impl SnapNameMap {
                 eprintln!("WARNING: {pathdata:?} is located on a non-ZFS dataset.  httm can only list snapshot names for ZFS datasets.");
                 None
             }
-            Some(md) => opt_split
-                .map(|(snap, relpath)| (format!("{}@{snap}", md.source), PathBuf::from(relpath))),
-            _ => None,
+            Some(md) => opt_split.map(|(snap, relpath)| DeconstructedSnapPathData {
+                snap_name: format!("{}@{snap}", md.source),
+                relpath: {
+                    if include_relpath {
+                        Some(relpath.to_owned())
+                    } else {
+                        None
+                    }
+                },
+            }),
+            None => None,
         }
     }
 }

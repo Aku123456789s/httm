@@ -19,17 +19,17 @@ use std::{
     cmp::{Ord, Ordering, PartialOrd},
     ffi::OsStr,
     fs::{symlink_metadata, DirEntry, File, FileType, Metadata},
-    io::BufReader,
+    io::{BufRead, BufReader},
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use once_cell::sync::OnceCell;
+use once_cell::sync::{Lazy, OnceCell};
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 use simd_adler32::bufread::adler32;
+use which::which;
 
-use crate::parse::mounts::MapOfDatasets;
 use crate::{config::generate::ListSnapsOfType, parse::aliases::MapOfAliases};
 use crate::{
     config::generate::PrintMode,
@@ -42,6 +42,7 @@ use crate::{
     library::utility::{display_human_size, get_date},
     GLOBAL_CONFIG,
 };
+use crate::{lookup::snap_names::DeconstructedSnapPathData, parse::mounts::MapOfDatasets};
 
 // only the most basic data from a DirEntry
 // for use to display in browse window and internally
@@ -303,7 +304,7 @@ impl Ord for CompareVersionsContainer {
         if self_md.size == other_md.size
             && self.opt_hash.is_some()
             && other.opt_hash.is_some()
-            && self.is_same_file(other)
+            && self.is_same_file_zdb(other)
         {
             return Ordering::Equal;
         }
@@ -321,6 +322,61 @@ impl CompareVersionsContainer {
         };
 
         CompareVersionsContainer { pathdata, opt_hash }
+    }
+
+    #[inline]
+    #[allow(unused_assignments)]
+    fn is_same_file_zdb(&self, other: &Self) -> bool {
+        // SAFETY: Unwrap will fail on opt_hash is None, here we've guarded this above
+        let self_hash_cell = self
+            .opt_hash
+            .as_ref()
+            .expect("opt_hash should be check prior to this point and must be Some");
+        let other_hash_cell = other
+            .opt_hash
+            .as_ref()
+            .expect("opt_hash should be check prior to this point and must be Some");
+
+        let (self_hash, other_hash) = rayon::join(
+            || Self::extract_hash(&self.pathdata),
+            || Self::extract_hash(&other.pathdata),
+        );
+
+        self_hash_cell.get_or_init(|| self_hash);
+        other_hash_cell.get_or_init(|| other_hash);
+
+        self_hash == other_hash
+    }
+
+    fn extract_hash(pathdata: &PathData) -> u32 {
+        use simd_adler32::Adler32;
+        use std::process::Command as ExecProcess;
+
+        static ZDB_COMMAND: Lazy<PathBuf> = Lazy::new(|| which("zdb").unwrap());
+
+        let deconstructed = DeconstructedSnapPathData::new(pathdata, true).unwrap();
+        let mut process_args = vec!["-vvvvvv", "-O"];
+        process_args.push(&deconstructed.snap_name);
+        process_args.push(deconstructed.relpath.as_ref().unwrap());
+
+        let process_output = ExecProcess::new(ZDB_COMMAND.as_os_str())
+            .args(&process_args)
+            .output()
+            .unwrap();
+
+        let mut adler = Adler32::new();
+
+        std::str::from_utf8(&process_output.stdout)
+            .unwrap()
+            .lines()
+            .filter(|line| line.contains("cksum"))
+            .filter_map(|line| line.split_once("cksum="))
+            .for_each(|(_lhs, rhs)| {
+                adler.write(rhs.as_bytes());
+            });
+
+        
+        adler.finish()
     }
 
     #[inline]
